@@ -1,0 +1,142 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.example.textexporter'
+    compileSdk 34
+    defaultConfig {
+        applicationId "com.example.textexporter"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+    buildFeatures { viewBinding true }
+}
+
+dependencies {
+    implementation 'org.apache.poi:poi-ooxml:5.2.5' // لإنشاء DOCX
+}<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.textexporter">
+
+    <application
+        android:allowBackup="true"
+        android:label="Text Exporter"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Material3.DayNight.NoActionBar">
+        <activity android:name=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest><?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical" android:padding="16dp"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+
+    <EditText
+        android:id="@+id/inputText"
+        android:hint="الصق/اكتب النص هنا"
+        android:gravity="top|start"
+        android:minLines="10"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+    <Button
+        android:id="@+id/savePdfBtn"
+        android:text="حفظ كـ PDF"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+
+    <Button
+        android:id="@+id/saveDocxBtn"
+        android:text="حفظ كـ DOCX"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"/>
+</LinearLayout>package com.example.textexporter
+
+import android.content.ContentValues
+import android.graphics.pdf.PdfDocument
+import android.os.Build
+import android.os.Bundle
+import android.provider.MediaStore
+import android.widget.Button
+import android.widget.EditText
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import org.apache.poi.xwpf.usermodel.XWPFDocument
+import java.io.OutputStream
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        val input = findViewById<EditText>(R.id.inputText)
+        findViewById<Button>(R.id.savePdfBtn).setOnClickListener {
+            val ok = savePdf(input.text.toString())
+            Toast.makeText(this, if (ok) "تم الحفظ في Downloads" else "فشل الحفظ", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<Button>(R.id.saveDocxBtn).setOnClickListener {
+            val ok = saveDocx(input.text.toString())
+            Toast.makeText(this, if (ok) "تم الحفظ في Downloads" else "فشل الحفظ", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun createDownloadsStream(filename: String, mime: String): OutputStream? {
+        val resolver = contentResolver
+        val cv = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, filename)
+            put(MediaStore.Downloads.MIME_TYPE, mime)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+        }
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv) ?: return null
+        val out = resolver.openOutputStream(uri)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            cv.clear(); cv.put(MediaStore.Downloads.IS_PENDING, 0)
+            resolver.update(uri, cv, null, null)
+        }
+        return out
+    }
+
+    private fun savePdf(text: String): Boolean {
+        if (text.isBlank()) return false
+        val doc = PdfDocument()
+        val pageInfo = PdfDocument.PageInfo.Builder(595, 842, 1).create() // A4 تقريبًا
+        val page = doc.startPage(pageInfo)
+        val canvas = page.canvas
+        val paint = android.graphics.Paint().apply { textSize = 12f }
+        val lines = text.split("\n")
+        var y = 40f
+        for (line in lines) {
+            if (y > 800) break
+            canvas.drawText(line, 40f, y, paint)
+            y += 18f
+        }
+        doc.finishPage(page)
+        val out = createDownloadsStream("export.pdf", "application/pdf") ?: return false
+        out.use { doc.writeTo(it) }
+        doc.close()
+        return true
+    }
+
+    private fun saveDocx(text: String): Boolean {
+        if (text.isBlank()) return false
+        val document = XWPFDocument()
+        val p = document.createParagraph()
+        val r = p.createRun()
+        r.setText(text)
+        val out = createDownloadsStream("export.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document") ?: return false
+        out.use { document.write(it) }
+        document.close()
+        return true
+    }
+}
